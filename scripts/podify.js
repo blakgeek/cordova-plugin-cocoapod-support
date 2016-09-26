@@ -32,6 +32,7 @@ module.exports = function (context) {
     var schemesSrcDir = path.join(pluginDir, 'schemes');
     var schemesTargetDir = path.join(sharedDataDir, 'xcschemes');
     var bundlePathsToFix = [];
+    var useLegacy;
     var newPods = {
         pods: {}
     };
@@ -85,6 +86,7 @@ module.exports = function (context) {
                                     if(podsConfig) {
                                         iosMinVersion = maxVer(iosMinVersion, podsConfig.$['ios-min-version']);
                                         useFrameworks = podsConfig.$['use-frameworks'] === 'true' ? 'true' : useFrameworks;
+                                        useLegacy = podsConfig.$['use-legacy'] === 'true' ? '2.3' : useLegacy;
                                     }
                                     (platform.pod || []).forEach(function (pod) {
                                         newPods.pods[pod.$.id] = pod.$;
@@ -174,6 +176,14 @@ module.exports = function (context) {
                 bridgedHeaderRegex = /\/\/SWIFT_OBJC_BRIDGING_HEADER/g;
                 fs.writeFileSync('platforms/ios/cordova/build.xcconfig', buildConfigContext.replace(bridgedHeaderRegex, 'SWIFT_OBJC_BRIDGING_HEADER'));
 
+            }
+
+            if(useLegacy){
+                for(podId in newPods.pods){
+                    var podXcContents = fs.readFileSync('platforms/ios/Pods/Target Support Files/' + podId + '/' + podId + '.xcconfig', 'utf8');
+                    fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + podId + '/' + podId + '.xconfig', podXcContents + '\n' + 'SWIFT_VERSION=2.3')
+                    console.log('Writing Legacy Swift Version 2.3');
+                }
             }
 
             fs.writeFileSync(podConfigPath, JSON.stringify(newPods, null, '\t'));
