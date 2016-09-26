@@ -41,8 +41,8 @@ In a plugin's plugin.xml
     <dependency id="cordova-plugin-cocoapod-support"/>
 
     <platform name="ios">
-        <!-- optionally set minimum ios version and enable use_frameworks! -->
-        <pods-config ios-min-version="9.0" uses-frameworks="true"/>
+        <!-- optionally set minimum ios version, enable use_frameworks! and enable legacy swift (2.3)-->
+        <pods-config ios-min-version="9.0" use-frameworks="true" use-legacy="true"/>
         <pod id="LatestPod" />
         <pod id="VersionedPod" version="1.0.0" />
         <pod id="GitPod1" git="https://github.com/blakgeek/something" tag="v1.0.1" configuration="debug" />
@@ -93,6 +93,8 @@ or have a look at [the demo plugin](https://github.com/blakgeek/cordova-plugin-w
 ## Notes
 * Enabling the pods_use_frameworks preference disables the bridged headers property added by 
 [CB-10072](https://issues.apache.org/jira/browse/CB-10072).  This might cause odd behavior in some projects.  
+
+* If legacy is not used for swift the default version will be 3.0
 
 
 ##TODO:
