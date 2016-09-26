@@ -250,12 +250,17 @@ module.exports = function (context) {
 
     function fixSwiftLegacy(shouldRun){
         var directories = getDirectories(path.join(__dirname + '/../../../platforms/ios/Pods/Target Support Files')),
-            podXcContents;
+            podXcContents,
+            SWIFT_VERSION_REGX = /SWIFT_VERSION=(?:\d*\.)\d/g;
         if(useLegacy){
             for(var i = 0; i < directories.length; i++){
                 if(directories[i].indexOf(appName) === -1){
                     podXcContents = fs.readFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', 'utf8');
-                    fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents + '\n' + 'SWIFT_VERSION=' + useLegacy)
+                    if(podXcContents.indexOf('SWIFT_VERSION') === -1){
+                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents + '\n' + 'SWIFT_VERSION=' + useLegacy)
+                    } else {
+                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents.replace(SWIFT_VERSION_REGX, 'SWIFT_VERSION=' + useLegacy))
+                    }
                 }
             }
 
