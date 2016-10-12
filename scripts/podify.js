@@ -249,10 +249,13 @@ module.exports = function (context) {
             var projectFix = "'-workspace', projectName + '.xcworkspace',";
             var xcodeprojRegex = /\.xcodeproj/g;
             var xcodeprojFix = '.xcworkspace';
+            var destinationSimulatorOrg = "'-destination', 'platform=iOS Simulator'";
+            var destinationSimulatorNew = "'-destination generic/platform=iOS'";
             var fixedBuildContent = buildContent
                 .replace(targetRegex, targetFix)
                 .replace(projectRegex, projectFix)
-                .replace(xcodeprojRegex, xcodeprojFix);
+                .replace(xcodeprojRegex, xcodeprojFix)
+                .replace(destinationSimulatorOrg, destinationSimulatorNew);
 
             fs.writeFileSync('platforms/ios/cordova/lib/build.js', fixedBuildContent);
 
