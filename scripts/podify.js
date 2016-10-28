@@ -36,7 +36,7 @@ module.exports = function (context) {
         pods: {}
     };
 
-    console.log('Searching for new pods');
+    // console.log('Searching for new pods');
 
     return Q.all(parsePluginXmls())
         .then(parseConfigXml)
@@ -50,7 +50,7 @@ module.exports = function (context) {
         parser.parseString(fs.readFileSync('config.xml'), function (err, data) {
 
             if (data.widget.platform) {
-                console.log('Checking config.xml for pods.');
+                // console.log('Checking config.xml for pods.');
                 data.widget.platform.forEach(function (platform) {
                     if (platform.$.name === 'ios') {
                         (platform.pod || []).forEach(function (pod) {
@@ -76,7 +76,7 @@ module.exports = function (context) {
                     deferred.reject(err);
                 } else {
                     if (data.plugin.platform) {
-                        console.log('Checking %s for pods.', id);
+                        // console.log('Checking %s for pods.', id);
                         data.plugin.platform.forEach(function (platform) {
 
                             if (platform.$.name === 'ios') {
@@ -88,7 +88,7 @@ module.exports = function (context) {
                                     }
                                     (platform.pod || []).forEach(function (pod) {
                                         newPods.pods[pod.$.id] = pod.$;
-                                        console.log('%s requires pod: %s', id, pod.$.id);
+                                        // console.log('%s requires pod: %s', id, pod.$.id);
                                     });
                                 }
                             }
