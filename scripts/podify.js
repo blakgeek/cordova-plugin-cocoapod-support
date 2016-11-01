@@ -32,6 +32,7 @@ module.exports = function (context) {
     var schemesSrcDir = path.join(pluginDir, 'schemes');
     var schemesTargetDir = path.join(sharedDataDir, 'xcschemes');
     var bundlePathsToFix = [];
+    var useLegacy;
     var newPods = {
         pods: {}
     };
@@ -43,6 +44,7 @@ module.exports = function (context) {
         .then(createFiles)
         .then(installPods)
         .then(fixBundlePaths)
+        .then(fixSwiftLegacy)
         .then(updateBuild);
 
     function parseConfigXml() {
@@ -60,6 +62,12 @@ module.exports = function (context) {
                     }
                 });
             }
+        });
+    }
+
+    function getDirectories(srcpath) {
+        return fs.readdirSync(srcpath).filter(function(file) {
+            return fs.statSync(path.join(srcpath, file)).isDirectory();
         });
     }
 
@@ -85,6 +93,7 @@ module.exports = function (context) {
                                     if(podsConfig) {
                                         iosMinVersion = maxVer(iosMinVersion, podsConfig.$['ios-min-version']);
                                         useFrameworks = podsConfig.$['use-frameworks'] === 'true' ? 'true' : useFrameworks;
+                                        useLegacy = podsConfig.$['use-legacy'] === 'true' ? '2.3' : '3.0';
                                     }
                                     (platform.pod || []).forEach(function (pod) {
                                         newPods.pods[pod.$.id] = pod.$;
@@ -234,6 +243,29 @@ module.exports = function (context) {
             fs.writeFileSync(podsResourcesSh, content);
         }
 
+
+        return shouldRun;
+    }
+
+
+    function fixSwiftLegacy(shouldRun){
+        var directories = getDirectories(path.join(__dirname + '/../../../platforms/ios/Pods/Target Support Files')),
+            podXcContents,
+            SWIFT_VERSION_REGX = /SWIFT_VERSION=(?:\d*\.)\d/g;
+        if(useLegacy){
+            for(var i = 0; i < directories.length; i++){
+                if(directories[i].indexOf(appName) === -1){
+                    podXcContents = fs.readFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', 'utf8');
+                    if(podXcContents.indexOf('SWIFT_VERSION') === -1){
+                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents + '\n' + 'SWIFT_VERSION=' + useLegacy)
+                    } else {
+                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents.replace(SWIFT_VERSION_REGX, 'SWIFT_VERSION=' + useLegacy))
+                    }
+                }
+            }
+
+            console.log('Using Swift Version ' + useLegacy);
+        }
 
         return shouldRun;
     }
