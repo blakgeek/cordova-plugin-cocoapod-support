@@ -238,6 +238,18 @@ module.exports = function (context) {
         return shouldRun;
     }
 
+    function createDirIfDoesNotExist(path) {
+        fs.statSync(path, function(err, stats) {
+            if (err) {
+                console.error('Error while accessing directory', path, err);
+                return;
+            }
+            if (!stats.isDirectory()) {
+                fs.mkdirSync(path);
+            }
+        });
+    }
+
     function updateBuild(shouldRun) {
 
         if(shouldRun) {
@@ -261,8 +273,8 @@ module.exports = function (context) {
 
             if (!podified) {
                 console.log('Adding schemes');
-                fs.mkdirSync(sharedDataDir);
-                fs.mkdirSync(schemesTargetDir);
+                createDirIfDoesNotExist(sharedDataDir);
+                createDirIfDoesNotExist(schemesTargetDir);
                 copyTpl(schemesSrcDir + '/CordovaLib.xcscheme', schemesTargetDir + '/CordovaLib.xcscheme', {
                     appName: appName
                 });
