@@ -37,6 +37,7 @@ module.exports = function (context) {
     var schemesTargetDir = path.join(sharedDataDir, 'xcschemes');
     var bundlePathsToFix = [];
     var newPods = {
+        sources: [],
         pods: {}
     };
 
@@ -93,6 +94,11 @@ module.exports = function (context) {
                                     if (podsConfig) {
                                         iosMinVersion = maxVer(iosMinVersion, podsConfig.$['ios-min-version']);
                                         useFrameworks = podsConfig.$['use-frameworks'] === 'true' ? 'true' : useFrameworks;
+
+                                        (podsConfig.source || []).forEach(function (podSource) {
+                                            console.log('%s requires pod source: %s', id, podSource.$.url);
+                                            newPods.sources.push(podSource.$.url)
+                                        });
                                     }
                                     (platform.pod || []).forEach(function (pod) {
                                         newPods.pods[pod.$.id] = pod.$;
@@ -123,6 +129,12 @@ module.exports = function (context) {
             if (useFrameworks === 'true') {
                 podfileContents.push("use_frameworks!");
             }
+
+            (newPods.sources || []).forEach(function (podSource) {
+                console.log("Adding pod source " + podSource);
+                podfileContents.push("source '" + podSource + "'");
+            });
+
             podfileContents.push("target '" + appName + "' do");
 
             for (podId in newPods.pods) {
