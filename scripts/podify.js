@@ -97,6 +97,7 @@ module.exports = function (context) {
                                     if (podsConfig) {
                                         iosMinVersion = maxVer(iosMinVersion, podsConfig.$ ? podsConfig.$['ios-min-version'] : iosMinVersion);
                                         useFrameworks = podsConfig.$ && podsConfig.$['use-frameworks'] === 'true' ? 'true' : useFrameworks;
+                                        useLegacy = podsConfig.$ && podsConfig.$['swift-version'] ? podsConfig.$['swift-version'] : useLegacy;
 
                                         (podsConfig.source || []).forEach(function (podSource) {
                                             console.log('%s requires pod source: %s', id, podSource.$.url);
