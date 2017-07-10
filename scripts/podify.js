@@ -26,6 +26,7 @@ module.exports = function (context) {
         configParser.getPreference('deployment-target') ||
         oldMinVersion || '7.0';
     var useFrameworks = configParser.getPreference('pods_use_frameworks', 'ios') || configParser.getPreference('pods_use_frameworks') || 'false';
+    var useLegacy = configParser.getPreference('pods_swift_version', 'ios') || configParser.getPreference('pods_swift_version') || false;
     var podConfigPath = path.join(rootPath, 'platforms', 'ios', '.pods.json');
     var pod, podName;
     var podified = fs.existsSync(podConfigPath);
@@ -52,6 +53,7 @@ module.exports = function (context) {
         .then(createFiles)
         .then(installPods)
         .then(fixBundlePaths)
+        .then(fixSwiftLegacy)
         .then(updateBuild);
 
     function parseConfigXml() {
