@@ -303,7 +303,7 @@ module.exports = function (context) {
     }
 
     function fixSwiftLegacy(shouldRun) {
-        var directories = getDirectories(path.join(__dirname + '/../../../platforms/ios/Pods/Target Support Files')),
+        var directories = fs.readdirSync(path.join(__dirname + '/../../../platforms/ios/Pods/Target Support Files')),
             podXcContents,
             SWIFT_VERSION_REGX = /SWIFT_VERSION=(?:\d*\.)\d/g;
         if (useLegacy) {
