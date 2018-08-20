@@ -2,11 +2,11 @@
 
 var _ = require('lodash');
 var fs = require('fs');
-var path = require("path");
+var path = require('path');
 var xml2js = require('xml2js');
 var spawn = require('child_process').spawn;
 var parser = new xml2js.Parser();
-require('shelljs/global');
+var shell = require('shelljs');
 
 module.exports = function (context) {
 
@@ -26,11 +26,12 @@ module.exports = function (context) {
         configParser.getPreference('deployment-target') ||
         oldMinVersion || '7.0';
     var useFrameworks = configParser.getPreference('pods_use_frameworks', 'ios') || configParser.getPreference('pods_use_frameworks') || 'false';
+    var useLegacy = configParser.getPreference('pods_use_legacy', 'ios') || configParser.getPreference('pods_use_legacy') || false;
     var podConfigPath = path.join(rootPath, 'platforms', 'ios', '.pods.json');
     var pod, podName;
     var podified = fs.existsSync(podConfigPath);
     var currentPods = podified ? JSON.parse(fs.readFileSync(podConfigPath)) : {};
-    var workspaceDir = path.join(rootPath, 'platforms', 'ios', '' + appName + '.xcworkspace');
+    var workspaceDir = path.join(rootPath, 'platforms', 'ios', `${appName}.xcworkspace`);
     var sharedDataDir = path.join(workspaceDir, 'xcshareddata');
     var pluginDir = context.opts.plugin.pluginInfo.dir;
     var schemesSrcDir = path.join(pluginDir, 'schemes');
@@ -38,7 +39,8 @@ module.exports = function (context) {
     var bundlePathsToFix = [];
     var newPods = {
         pods: {},
-        sources: {}
+        sources: {},
+        plugins: {}
     };
 
     if (oldMinVersion) {
@@ -52,12 +54,12 @@ module.exports = function (context) {
         .then(createFiles)
         .then(installPods)
         .then(fixBundlePaths)
+        .then(fixSwiftLegacy)
         .then(updateBuild);
 
     function parseConfigXml() {
 
         parser.parseString(fs.readFileSync('config.xml'), function (err, data) {
-
             if (data.widget.platform) {
                 log('Checking config.xml for pods.');
                 data.widget.platform.forEach(function (platform) {
@@ -74,13 +76,12 @@ module.exports = function (context) {
     }
 
     function parsePluginXmls() {
-
         var promises = [];
         context.opts.cordova.plugins.forEach(id => {
 
             const deferred = Q.defer();
 
-            parser.parseString(fs.readFileSync('plugins/' + id + '/plugin.xml'), function (err, data) {
+            parser.parseString(fs.readFileSync(`plugins/${id}/plugin.xml`), function (err, data) {
 
                 if (err) {
                     deferred.reject(err);
@@ -95,18 +96,31 @@ module.exports = function (context) {
                                 if (podsConfig) {
                                     iosMinVersion = maxVer(iosMinVersion, podsConfig.$ ? podsConfig.$['ios-min-version'] : iosMinVersion);
                                     useFrameworks = podsConfig.$ && podsConfig.$['use-frameworks'] === 'true' ? 'true' : useFrameworks;
+                                    useLegacy = podsConfig.$ && podsConfig.$['use-legacy'] ? podsConfig.$['use-legacy'] : useLegacy;
 
                                     (podsConfig.source || []).forEach(function (podSource) {
                                         log(`${id} requires pod source: ${podSource.$.url}`);
                                         newPods.sources[podSource.$.url] = true;
+                                    });
+
+                                    (podsConfig.plugin || []).forEach(function (podPlugin) {
+                                        log(`${id} requires pod plugin : ${podPlugin.$.name}`);
+                                        const newPodPluginConfig = {};
+
+                                        (podPlugin['plugin-config'] || []).forEach(function (podPluginConfig) {
+                                            const key = podPluginConfig.$.key;
+                                            const value = podPluginConfig[key] ? podPluginConfig[key].map(x => x.$.name) : podPluginConfig.$.value;
+                                            newPodPluginConfig[key] = value;
+                                        });
+
+                                        newPods.plugins[podPlugin.$.name] = newPodPluginConfig;
                                     });
                                 }
 
                                 // support native dependency specification
                                 // <framework src="GoogleCloudMessaging" type="podspec" spec="~> 1.2.0" />
                                 (platform.framework || []).forEach(framework => {
-
-                                    if(framework.$.type === 'podspec') {
+                                    if (framework.$.type === 'podspec') {
 
                                         let name = framework.$.src;
                                         newPods.pods[name] = Object.assign({type: 'native'}, framework.$);
@@ -140,17 +154,41 @@ module.exports = function (context) {
 
         if (!podified || !_.isEqual(newPods, currentPods)) {
 
-            podfileContents.push("platform :ios, '" + iosMinVersion + "'");
+            podfileContents.push(`platform :ios, '${iosMinVersion}'`);
             if (useFrameworks === 'true') {
-                podfileContents.push("use_frameworks!");
+                podfileContents.push('use_frameworks!');
             }
 
             Object.keys(newPods.sources).forEach(function (podSource) {
-                log("Adding pod source " + podSource);
-                podfileContents.push("source '" + podSource + "'");
+                log(`Adding pod source ${podSource}`);
+                podfileContents.push(`source '${podSource}'`);
             });
 
-            podfileContents.push("target '" + appName + "' do");
+            Object.entries(newPods.plugins).forEach(function (podPluginData) {
+                const [podPlugin, podPluginConfig] = podPluginData;
+                log(`Adding pod plugin ${podPlugin}`);
+                let plugin = `plugin '${podPlugin}'`;
+                if (!_.isEmpty(podPluginConfig)) {
+                    plugin = `${plugin}, {`;
+                    Object.entries(podPluginConfig).forEach(function(podPluginConfigData) {
+                        const [key, value] = podPluginConfigData;
+                        plugin = `${plugin}\n\t:${key} =>`;
+                        if (_.isArray(value)) {
+                            plugin = `${plugin} [`;
+                            Object.values(value).forEach(function(name) {
+                                plugin = `${plugin}\n\t\t'${name}'`;
+                            });
+                            plugin = `${plugin}\n\t],`;
+                        } else {
+                            plugin = `${plugin} '${value}',`;
+                        }
+                    });
+                    plugin = `${plugin}\n}`;
+                }
+                podfileContents.push(plugin);
+            });
+
+            podfileContents.push(`target "${appName}" do`);
 
             for (podName in newPods.pods) {
 
@@ -163,27 +201,27 @@ module.exports = function (context) {
                 if (pod.version) {
                     suffix = `, '${pod.version}'`;
                 } else if (pod.git) {
-                    suffix = ", :git => '" + pod.git + "'";
+                    suffix = `, :git => '${pod.git}'`;
                     if (pod.tag) {
-                        suffix += ", :tag => '" + pod.tag + "'";
+                        suffix += `, :tag => '${pod.tag}'`;
                     } else if (pod.branch) {
-                        suffix += ", :branch => '" + pod.branch + "'";
+                        suffix += `, :branch => '${pod.branch}'`;
                     } else if (pod.commit) {
-                        suffix += ", :commit => '" + pod.commit + "'";
+                        suffix += `, :commit => '${pod.commit}'`;
                     }
 
                 } else if (pod.path) {
-                    suffix = ", :path => '" + pod.path + "'";
+                    suffix = `, :path => '${pod.path}'`;
                 } else if (pod.subspecs) {
                     var specs = pod.subspecs.split(',').map(spec => `'${spec.trim()}'`);
-                    suffix = ", :subspecs => [" + specs.join() + "]";
+                    suffix = `, :subspecs => [${specs.join()}]`;
                 } else if (pod.configuration) {
-                    suffix = ", :configuration => '" + pod.configuration + "'";
+                    suffix = `, :configuration => '${pod.configuration}'`;
                 } else if (pod.configurations) {
                     var configs = pod.configurations.split(',').map(config => `'${config.trim()}`);
-                    suffix = ", :subspecs => [" + configs.join() + "]";
+                    suffix = `, :subspecs => [${configs.join()}]`;
                 } else if (pod.podspec) {
-                    suffix = ", :podspec => '" + pod.podspec + "'";
+                    suffix = `, :podspec => '${pod.podspec}'`;
                 } else if (pod.spec) {
                     suffix = pod.spec.startsWith(':') ? `, ${pod.spec}` : `, '${pod.spec}'`;
                 } else {
@@ -196,13 +234,13 @@ module.exports = function (context) {
             fs.writeFileSync('platforms/ios/Podfile', podfileContents.join('\n'));
 
             var debugXcContents = fs.readFileSync('platforms/ios/cordova/build-debug.xcconfig', 'utf8');
-            var includeRegex = new RegExp('#include "Pods/Target Support Files/Pods-' + appName + '/Pods-' + appName + '\\.\\w+\\.xcconfig"');
+            var includeRegex = new RegExp(`#include "Pods/Target Support Files/Pods-${appName}/Pods-${appName}\\.\\w+\\.xcconfig"`);
             if (!includeRegex.test(debugXcContents)) {
-                fs.writeFileSync('platforms/ios/cordova/build-debug.xcconfig', debugXcContents + '\n' + '#include "Pods/Target Support Files/Pods-' + appName + '/Pods-' + appName + '.debug.xcconfig"');
+                fs.writeFileSync('platforms/ios/cordova/build-debug.xcconfig', `${debugXcContents}\n` + `#include "Pods/Target Support Files/Pods-${appName}/Pods-${appName}.debug.xcconfig"`);
             }
             var releaseXcContents = fs.readFileSync('platforms/ios/cordova/build-release.xcconfig', 'utf8');
             if (!includeRegex.test(releaseXcContents)) {
-                fs.writeFileSync('platforms/ios/cordova/build-release.xcconfig', releaseXcContents + '\n' + '#include "Pods/Target Support Files/Pods-' + appName + '/Pods-' + appName + '.release.xcconfig"');
+                fs.writeFileSync('platforms/ios/cordova/build-release.xcconfig', `${releaseXcContents}\n` + `#include "Pods/Target Support Files/Pods-${appName}/Pods-${appName}.release.xcconfig"`);
             }
 
             var buildConfigContext = fs.readFileSync('platforms/ios/cordova/build.xcconfig', 'utf8');
@@ -226,11 +264,11 @@ module.exports = function (context) {
 
         var deferred = Q.defer();
 
-        if (which('pod')) {
+        if (shell.which('pod')) {
 
             if (!podified || !_.isEqual(newPods, currentPods)) {
-                log("Installing pods");
-                log("Sit back and relax this could take a while.");
+                log('Installing pods');
+                log('Sit back and relax this could take a while.');
                 var podInstall = spawn('pod', ['install'], {
                     cwd: 'platforms/ios'
                 });
@@ -248,7 +286,7 @@ module.exports = function (context) {
             }
 
         } else {
-            log("\nAh man!. It doesn't look like you have CocoaPods installed.\n\nYou have two choices.\n\n1. Install Cocoapods:\n$ sudo gem install cocoapods\n2. Manually install the dependencies.");
+            log('\nAh man!. It doesn\'t look like you have CocoaPods installed.\n\nYou have two choices.\n\n1. Install Cocoapods:\n$ sudo gem install cocoapods\n2. Manually install the dependencies.');
             deferred.resolve(false);
         }
 
@@ -258,13 +296,13 @@ module.exports = function (context) {
     function fixBundlePaths(shouldRun) {
 
         if (bundlePathsToFix.length) {
-            var podsResourcesSh = 'platforms/ios/Pods/Target Support Files/Pods-' + appName + '/Pods-' + appName + '-resources.sh';
+            var podsResourcesSh = `platforms/ios/Pods/Target Support Files/Pods-${appName}/Pods-${appName}-resources.sh`;
             var content = fs.readFileSync(podsResourcesSh, 'utf8');
 
             bundlePathsToFix.forEach(function (path) {
-                var fixedPath = appName + '.app/' + path.split('/').slice(1).join('/');
-                var regex = new RegExp('(install_resource.*)' + path, 'gi');
-                content = content.replace(regex, "$1" + fixedPath);
+                var fixedPath = `${appName}.app/${path.split('/').slice(1).join('/')}`;
+                var regex = new RegExp(`(install_resource.*)${path}`, 'gi');
+                content = content.replace(regex, `$1${fixedPath}`);
 
             });
             fs.writeFileSync(podsResourcesSh, content);
@@ -279,10 +317,10 @@ module.exports = function (context) {
         if (shouldRun) {
             log('Updating ios build to use workspace.');
             var buildContent = fs.readFileSync('platforms/ios/cordova/lib/build.js', 'utf8');
-            var targetRegex = new RegExp("'-target',\\s*projectName\\s*,", 'g');
-            var targetFix = "'-scheme', projectName,";
-            var projectRegex = new RegExp("'-project'\\s*,\\s*projectName\\s*\\+\\s*'\\.xcodeproj'\\s*,", 'g');
-            var projectFix = "'-workspace', projectName + '.xcworkspace',";
+            var targetRegex = new RegExp('\'-target\',\\s*projectName\\s*,', 'g');
+            var targetFix = '\'-scheme\', projectName,';
+            var projectRegex = new RegExp('\'-project\'\\s*,\\s*projectName\\s*\\+\\s*\'\\.xcodeproj\'\\s*,', 'g');
+            var projectFix = '\'-workspace\', projectName + \'.xcworkspace\',';
             var xcodeprojRegex = /\.xcodeproj/g;
             var xcodeprojFix = '.xcworkspace';
             var fixedBuildContent = buildContent
@@ -294,18 +332,18 @@ module.exports = function (context) {
 
             if (!podified) {
                 log('Adding schemes');
-                if (!test('-e', sharedDataDir)) {
-                    mkdir(sharedDataDir);
+                if (!shell.test('-e', sharedDataDir)) {
+                    shell.mkdir(sharedDataDir);
                 }
 
-                if (!test('-e', schemesTargetDir)) {
-                    mkdir(schemesTargetDir);
+                if (!shell.test('-e', schemesTargetDir)) {
+                    shell.mkdir(schemesTargetDir);
                 }
 
-                copyTpl(schemesSrcDir + '/CordovaLib.xcscheme', schemesTargetDir + '/CordovaLib.xcscheme', {
+                copyTpl(`${schemesSrcDir}/CordovaLib.xcscheme`, `${schemesTargetDir}/CordovaLib.xcscheme`, {
                     appName: appName
                 });
-                copyTpl(schemesSrcDir + '/App.xcscheme', schemesTargetDir + '/' + appName + '.xcscheme', {
+                copyTpl(`${schemesSrcDir}/App.xcscheme`, `${schemesTargetDir}/${appName}.xcscheme`, {
                     appName: appName,
                     appId: '1D6058900D05DD3D006BFB54'
                 });
@@ -313,23 +351,30 @@ module.exports = function (context) {
         }
     }
 
+    function getDirectories(srcpath) {
+        return fs.readdirSync(srcpath).filter(function(file) {
+            return fs.statSync(path.join(srcpath, file)).isDirectory();
+        });
+    }
+
     function fixSwiftLegacy(shouldRun) {
-        var directories = getDirectories(path.join(__dirname + '/../../../platforms/ios/Pods/Target Support Files')),
-            podXcContents,
-            SWIFT_VERSION_REGX = /SWIFT_VERSION=(?:\d*\.)\d/g;
         if (useLegacy) {
+            var directories = getDirectories(path.join(`${__dirname}/../../../platforms/ios/Pods/Target Support Files`));
+            var podXcContents;
+            var SWIFT_VERSION_REGX = /SWIFT_VERSION=(?:\d*\.)\d/g;
+            var swiftVersion = useLegacy === 'true' ? '2.3' : useLegacy;
             for (var i = 0; i < directories.length; i++) {
                 if (directories[i].indexOf(appName) === -1) {
-                    podXcContents = fs.readFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', 'utf8');
+                    podXcContents = fs.readFileSync(`platforms/ios/Pods/Target Support Files/${directories[i]}/${directories[i]}.xcconfig`, 'utf8');
                     if (podXcContents.indexOf('SWIFT_VERSION') === -1) {
-                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents + '\n' + 'SWIFT_VERSION=' + useLegacy)
+                        fs.writeFileSync(`platforms/ios/Pods/Target Support Files/${directories[i]}/${directories[i]}.xcconfig`, `${podXcContents}\n` + `SWIFT_VERSION=${swiftVersion}`);
                     } else {
-                        fs.writeFileSync('platforms/ios/Pods/Target Support Files/' + directories[i] + '/' + directories[i] + '.xcconfig', podXcContents.replace(SWIFT_VERSION_REGX, 'SWIFT_VERSION=' + useLegacy))
+                        fs.writeFileSync(`platforms/ios/Pods/Target Support Files/${directories[i]}/${directories[i]}.xcconfig`, podXcContents.replace(SWIFT_VERSION_REGX, `SWIFT_VERSION=${swiftVersion}`));
                     }
                 }
             }
 
-            log('Using Swift Version ' + useLegacy);
+            log(`Using Swift Version ${swiftVersion}`);
         }
 
         return shouldRun;
@@ -338,8 +383,8 @@ module.exports = function (context) {
     function templify(str, data) {
 
         return str.replace(/{[^{}]+}/g, function (key) {
-            var k = key.replace(/[{}]+/g, "");
-            return data.hasOwnProperty(k) ? data[k] : "";
+            var k = key.replace(/[{}]+/g, '');
+            return data.hasOwnProperty(k) ? data[k] : '';
         });
     }
 
@@ -379,7 +424,7 @@ module.exports = function (context) {
             return v2;
         }
     }
-    
+
     function log(message) {
         console.log(message);
     }
