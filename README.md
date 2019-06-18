@@ -46,6 +46,12 @@ Plugin developers, here's a sample plugin.xml.
              <!-- optionally add private spec sources -->
             <source url="git@github.com:foo/foo-specs.git" />
             <source url="git@github.com:bar/bar-specs.git" />
+            <!-- optionally add CocoaPods plugin -->
+            <plugin name="cocoapods-art">
+                <plugin-config key="sources">
+                    <sources name="LOCAL_SPECS_REPO_NAME" />
+                </plugin-config>
+            </plugin>
         </pods-config>
         <!-- use the latest version of a pod -->
         <pod name="LatestPod" />
